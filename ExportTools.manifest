@@ -1,0 +1,13 @@
+{
+	"autodeskProduct":	"Fusion",
+	"type":	"addin",
+	"author":	"Krisnop Saimuey",
+	"description":	{
+		"":	""
+	},
+	"version":	"1.0",
+	"runOnStartup":	false,
+	"supportedOS":	"mac",
+	"editEnabled":	true,
+	"iconFilename":	"AddInIcon.svg"
+}
