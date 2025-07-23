@@ -4,6 +4,7 @@ import os
 import traceback
 import subprocess
 import platform
+import re
 from ...lib import fusionAddInUtils as futil
 from ... import config
 
@@ -107,6 +108,19 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
 
     versionInput = inputs.addStringValueInput('versionInput', 'Version')
 
+    prefixInput = inputs.addStringValueInput('prefixInput', 'Prefix')
+
+    suffixInput = inputs.addStringValueInput('suffixInput', 'Suffix')
+
+    nameFormatInput = inputs.addDropDownCommandInput('nameFormatInput', 'Name Formatting', 0)
+    dropdownItems = nameFormatInput.listItems
+    dropdownItems.add('None', True)
+    dropdownItems.add('PascalCase', False)
+    dropdownItems.add('camelCase', False)
+    dropdownItems.add('snake_case', False)
+    dropdownItems.add('kebab-case', False)
+    dropdownItems.add('space separated', False)
+
     replaceButton = inputs.addBoolValueInput(
         "replaceButton", "Replace existing", True, "", False
     )
@@ -148,20 +162,15 @@ def command_execute(args: adsk.core.CommandEventArgs):
     inputs = args.command.commandInputs
 
     selectionInput = inputs.itemById("selected_bodies")
+    selectedFolder = inputs.itemById("folderPathInput").text
+    replace = inputs.itemById("replaceButton").value
+    openLocation = inputs.itemById("openLocationButton").value
+    versionNumber = inputs.itemById('versionInput').value
+    prefix = inputs.itemById('prefixInput').value
+    suffix = inputs.itemById('suffixInput').value
+    formattingStyleIndex = inputs.itemById('nameFormatInput').selectedItem.index
 
-    folderPathInput = inputs.itemById("folderPathInput")
-    selectedFolder = folderPathInput.text
-
-    replaceInput = inputs.itemById("replaceButton")
-    replace = replaceInput.value
-
-    openLocationInput = inputs.itemById("openLocationButton")
-    openLocation = openLocationInput.value
-
-    versionInput = inputs.itemById('versionInput')
-    versionNumber = versionInput.value
-
-    exportSelectedBodies(selectionInput, selectedFolder, replace, openLocation, versionNumber)
+    exportSelectedBodies(selectionInput, selectedFolder, replace, openLocation, versionNumber, prefix, suffix, formattingStyleIndex)
 
 
 # This event handler is called when the command needs to compute a new preview in the graphics window.
@@ -170,8 +179,6 @@ def command_preview(args: adsk.core.CommandEventArgs):
     futil.log(f"{CMD_NAME} Command Preview Event")
     inputs = args.command.commandInputs
 
-    # inputs.itemById('')
-
 
 # This event handler is called when the user changes anything in the command dialog
 # allowing you to modify values of other inputs based on that change.
@@ -179,13 +186,17 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
     changed_input = args.input
     inputs = args.inputs
 
-    app = adsk.core.Application.get()
-    ui = app.userInterface
+    selectionInput = inputs.itemById("selected_bodies")
+    selectedFolderInput = inputs.itemById("folderPathInput")
+    filenameTable = inputs.itemById('filenameTable')
+    versionNumberInput = inputs.itemById('versionInput')
+    prefixInput = inputs.itemById('prefixInput')
+    suffixInput = inputs.itemById('suffixInput')
+    nameFormatInput = inputs.itemById('nameFormatInput')
 
     if changed_input.id == "browseButton":
         try:
-            folderPathInput = inputs.itemById("folderPathInput")
-            currentSelectedFolder = folderPathInput.text
+            currentSelectedFolder = selectedFolderInput.text
 
             # Create filder dialog
             folderDialog = ui.createFolderDialog()
@@ -203,33 +214,40 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
             # Reset button state
             changed_input.value = False
         except:
-            app.log("Failed:\n{}".format(traceback.format_exc()))
-
-    elif changed_input.id == "selected_bodies":
-        filenameTable = inputs.itemById('filenameTable')
-        filenameTable.clear()
-
-        selectedBodyNames = []
-        count = changed_input.selectionCount
-        for i in range(count):
-            name = changed_input.selection(i).entity.name
-            selectedBodyNames.append(name)
+            futil.log("Failed:\n{}".format(traceback.format_exc()))
         
-        app.log(str(selectedBodyNames))
 
-        for i, name in enumerate(selectedBodyNames):
-            # Create unique IDs and display names for each input
-            textBoxId = f'subText_{i}'
-            textBoxName = f'Body {i+1}'
-            textBoxValue = name 
+    ###############################################################
+    ######## This code is run every time any inputs change ########
+    ###############################################################
 
-            # Create a new TextBoxCommandInput
-            subTextInput = inputs.addTextBoxCommandInput(textBoxId, textBoxName, textBoxValue, 1, True)
+    filenameTable.clear()
 
-            # Add to the next available row in the table
-            row = filenameTable.rowCount
-            filenameTable.addCommandInput(subTextInput, row, 0)
+    formattingStyleIndex = nameFormatInput.selectedItem.index
 
+    selectedBodyNames = []
+    count = selectionInput.selectionCount
+    for i in range(count):
+        name = selectionInput.selection(i).entity.name
+        selectedBodyNames.append(name)
+
+    for i, name in enumerate(selectedBodyNames):
+
+        # Create unique IDs and display names for each input
+        textBoxId = f'subText_{i}'
+        textBoxName = f'Body {i+1}'
+        versionNumber = versionNumberInput.value
+        prefix = prefixInput.value
+        suffix = suffixInput.value
+        filename = generateFilename(name, versionNumber, prefix, suffix, formattingStyleIndex)
+        textBoxValue = filename
+
+        # Create a new TextBoxCommandInput
+        subTextInput = inputs.addTextBoxCommandInput(textBoxId, textBoxName, textBoxValue, 1, True)
+
+        # Add to the next available row in the table
+        row = filenameTable.rowCount
+        filenameTable.addCommandInput(subTextInput, row, 0)
 
 
     # General logging for debug.
@@ -274,12 +292,12 @@ def command_destroy(args: adsk.core.CommandEventArgs):
     local_handlers = []
 
 
-def exportSelectedBodies(selectionInput, exportFolder, replace, openLocation, versionNumber):
+def exportSelectedBodies(selectionInput, exportFolder, replace, openLocation, versionNumber, prefix, suffix, formattingStyleIndex):
     try:
         design = app.activeProduct
 
         if not design:
-            ui.messageBox("No active design found.")
+            futil.log("No active design found.")
             return
 
         # Filter selected bodies
@@ -289,10 +307,6 @@ def exportSelectedBodies(selectionInput, exportFolder, replace, openLocation, ve
             entity = selectionInput.selection(i).entity
             if entity.objectType == adsk.fusion.BRepBody.classType():
                 selectedBodies.append(entity)
-
-        # if len(selectedBodies) == 0:
-        #     ui.messageBox("Please select one or more bodies to export.")
-        #     return
 
         # Export each selected body
         exportMgr = design.exportManager
@@ -304,31 +318,19 @@ def exportSelectedBodies(selectionInput, exportFolder, replace, openLocation, ve
                 # Create STL export options
                 stlOptions = exportMgr.createSTLExportOptions(body)
 
-                # Generate filename
-                bodyName = body.name if body.name else f"Body_{i+1}"
-                # Clean filename (remove invalid characters)
-                bodyName = "".join(
-                    c for c in bodyName if c.isalnum() or c in (" ", "-", "_")
-                ).rstrip()
-
-                v = str(versionNumber).strip()
-
-                # Handle filename based on replace setting
-                baseFileName = bodyName
-                fileName = f"{baseFileName}_v{v}.stl" if v else f"{baseFileName}.stl"
+                bodyName = body.name
+                fileName = generateFilename(bodyName, versionNumber, prefix, suffix, formattingStyleIndex)
                 filePath = os.path.join(exportFolder, fileName)
 
+                futil.log(filePath)
+
                 if not replace:
-                    # Add suffix if file exists and replace is False
                     counter = 1
                     while os.path.exists(filePath):
-                        fileName = f"{baseFileName}_v{v}({counter}).stl" if v else f"{baseFileName}({counter}).stl"
+                        name, ext = os.path.splitext(fileName)
+                        fileName = f"{name}({counter}){ext}"
                         filePath = os.path.join(exportFolder, fileName)
                         counter += 1
-                else:
-                    # If replace is True, use the original filename even if it exists
-                    # The file will be overwritten during export
-                    pass
 
                 # Set export options
                 stlOptions.filename = filePath
@@ -344,6 +346,7 @@ def exportSelectedBodies(selectionInput, exportFolder, replace, openLocation, ve
 
             except Exception as e:
                 ui.messageBox(f'Failed to export body "{body.name}": {str(e)}')
+                futil.log("Failed to export:\n{}".format(traceback.format_exc()))
 
         # Show completion message
         if successCount > 0:
@@ -358,11 +361,43 @@ def exportSelectedBodies(selectionInput, exportFolder, replace, openLocation, ve
                 openFolderLocation(exportFolder)
 
         else:
-            ui.messageBox("No bodies were exported successfully.")
+            futil.log("No bodies were exported successfully.")
 
     except:
-        ui.messageBox("Failed to export:\n{}".format(traceback.format_exc()))
+        futil.log("Failed to export:\n{}".format(traceback.format_exc()))
 
+def generateFilename(bodyName, versionNumber, prefix, suffix, formattingStyleIndex):
+    name = sanitize_filename(bodyName)
+    versionStr = f"v{str(versionNumber).strip()}" if str(versionNumber).strip() else ""
+
+    nameSplit, ext = os.path.splitext(name)
+    
+    # Replace hyphens, underscores, and spaces with a single space
+    nameSplit = re.sub(r"[-_ ]+", " ", nameSplit)
+
+    # Insert space before uppercase letters that follow lowercase (e.g., fileName → file Name)
+    nameSplit = re.sub(r"([a-z])([A-Z])", r"\1 \2", nameSplit)
+
+    # Split into words and lowercase them all
+    words = nameSplit.lower().split()
+
+    if formattingStyleIndex == 1: #PascalCase
+        name = ''.join(w.capitalize() for w in words) + ext
+    elif formattingStyleIndex == 2: #camelCase
+        name = words[0] + ''.join(w.capitalize() for w in words[1:]) + ext
+    elif formattingStyleIndex == 3: #snake_case
+        name = '_'.join(words) + ext
+        versionStr = f'_{versionStr}'
+    elif formattingStyleIndex == 4: #kebab-case
+        name = '-'.join(words) + ext
+        versionStr = f'-{versionStr}'
+    elif formattingStyleIndex == 5: #space separated
+        name = ' '.join(words) + ext
+        versionStr = f' {versionStr}'
+    else:
+        pass
+
+    return f'{prefix}{name}{versionStr}{suffix}.stl'
 
 def getLastUsedFolder():
     # Get the last used folder from document attributes
@@ -379,10 +414,10 @@ def getLastUsedFolder():
                     return folderPath
 
         # Default to user's Documents folder if no last used folder
-        return os.path.expanduser("/Users")
+        return os.path.expanduser("~")
 
     except:
-        return os.path.expanduser("/Users")
+        return os.path.expanduser("~")
 
 
 def saveLastUsedFolder(folderPath):
@@ -411,7 +446,7 @@ def openFolderLocation(folderPath):
         if not os.path.exists(folderPath):
             app = adsk.core.Application.get()
             ui = app.userInterface
-            ui.messageBox(f"Folder does not exist:\n{folderPath}")
+            futil.log(f"Folder does not exist:\n{folderPath}")
             return
 
         system = platform.system()
@@ -439,7 +474,7 @@ def openFolderLocation(folderPath):
         # If opening fails, show the path in a message
         app = adsk.core.Application.get()
         ui = app.userInterface
-        ui.messageBox(
+        futil.log(
             f"Could not open folder automatically.\nFiles saved to:\n{folderPath}"
         )
 
@@ -449,3 +484,9 @@ def shorten_path(path, keep=2):
     if len(parts) <= keep:
         return path  # nothing to shorten
     return os.path.join("...", *parts[-keep:])
+
+def sanitize_filename(name):
+    # Remove invalid characters
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1F]', '', name)
+    # Remove trailing spaces or dots
+    return name.rstrip(" .")
