@@ -208,8 +208,9 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
 
             if dialogResult == adsk.core.DialogResults.DialogOK:
                 # Update the text input with selected folder path
+                path = folderDialog.folder
                 pathInput = inputs.itemById("folderPathInput")
-                pathInput.text = folderDialog.folder
+                pathInput.text = path
 
             # Reset button state
             changed_input.value = False
@@ -421,7 +422,8 @@ def getLastUsedFolder():
 
 
 def saveLastUsedFolder(folderPath):
-    """Save the folder path to document attributes"""
+    # Save the folder path to document attributes
+    futil.log('Start saving folder path!')
     try:
         app = adsk.core.Application.get()
         doc = app.activeDocument
@@ -434,13 +436,14 @@ def saveLastUsedFolder(folderPath):
 
             # Add new attribute with folder path
             doc.attributes.add("ExportTools", "LastUsedFolder", folderPath)
-
+        
+        futil.log('Folder path save successfully!')
     except:
-        pass  # Fail silently if we can't save
+        futil.log("Failed:\n{}".format(traceback.format_exc()))
 
 
 def openFolderLocation(folderPath):
-    """Open the folder location in the system's file manager with better error handling"""
+    # Open the folder location in the system's file manager with better error handling
     try:
         # Ensure the folder exists
         if not os.path.exists(folderPath):
@@ -477,13 +480,6 @@ def openFolderLocation(folderPath):
         futil.log(
             f"Could not open folder automatically.\nFiles saved to:\n{folderPath}"
         )
-
-
-def shorten_path(path, keep=2):
-    parts = path.split(os.sep)
-    if len(parts) <= keep:
-        return path  # nothing to shorten
-    return os.path.join("...", *parts[-keep:])
 
 def sanitize_filename(name):
     # Remove invalid characters
