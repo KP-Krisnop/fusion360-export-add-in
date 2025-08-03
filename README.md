@@ -14,6 +14,8 @@ A Fusion 360 Add-in by Krisnop Saimuey for exporting selected bodies as STL file
 * The command is promoted and easily accessible in the **UTILITIES** workspace.  
 * The add-in can be run from the **Scripts and Add-ins** dialog.
 
+<img width="342" height="487" alt="Image" src="https://github.com/user-attachments/assets/09813d66-c100-47e7-8bc2-1a9410209d36" />
+
 ## **Installation**
 
 This add-in is a macOS-only script.
@@ -24,6 +26,8 @@ This add-in is a macOS-only script.
 5. Click the \+ icon and navigate to the directory where you extracted the add-in.  
 6. Select the folder and click **Select Folder**. The add-in will now appear in your list.  
 7. The add-in is now installed and ready to use.
+
+<img width="1172" height="790" alt="Image" src="https://github.com/user-attachments/assets/b4ad6090-df5d-45f5-9268-9736e781af02" />
 
 ## **How to Use**
 
