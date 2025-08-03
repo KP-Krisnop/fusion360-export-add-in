@@ -98,7 +98,7 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
     )
 
     selectionInput = inputs.addSelectionInput(
-        "selected_bodies", "Select Bodies", "Select Bodies"
+        "selectedBodies", "Select Bodies", "Select Bodies"
     )
     selectionInput.setSelectionLimits(0)
     selectionInput.addSelectionFilter("Bodies")
@@ -106,13 +106,16 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
     filenameTable = inputs.addTableCommandInput('filenameTable', "Filenames", 1, "1")
     filenameTable.maximumVisibleRows = 10
 
-    versionInput = inputs.addStringValueInput('versionInput', 'Version')
+    groupNameInput = inputs.addGroupCommandInput('groupNameInput', 'Advanced Naming')
+    groupNameChildren = groupNameInput.children
 
-    prefixInput = inputs.addStringValueInput('prefixInput', 'Prefix')
+    versionInput = groupNameChildren.addStringValueInput('versionInput', 'Version')
 
-    suffixInput = inputs.addStringValueInput('suffixInput', 'Suffix')
+    prefixInput = groupNameChildren.addStringValueInput('prefixInput', 'Prefix')
 
-    nameFormatInput = inputs.addDropDownCommandInput('nameFormatInput', 'Name Formatting', 0)
+    suffixInput = groupNameChildren.addStringValueInput('suffixInput', 'Suffix')
+
+    nameFormatInput = groupNameChildren.addDropDownCommandInput('nameFormatInput', 'Name Formatting', 0)
     dropdownItems = nameFormatInput.listItems
     dropdownItems.add('None', True)
     dropdownItems.add('PascalCase', False)
@@ -124,12 +127,10 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
     replaceButton = inputs.addBoolValueInput(
         "replaceButton", "Replace existing", True, "", False
     )
-    replaceButton.tooltip = "Replace existing files if necessary"
+    replaceButton.tooltip = "Replace existing files"
 
-    openLocationButton = inputs.addBoolValueInput(
-        "openLocationButton", "Open location", True, "", False
-    )
-    openLocationButton.tooltip = "Open location after export files"
+    errorTextInput = inputs.addTextBoxCommandInput('errorTextInput', 'Log', '', 2, True)
+    errorTextInput.isFullWidth = True
 
     # TODO Connect to the events that are needed by this command.
     futil.add_handler(
@@ -161,16 +162,12 @@ def command_execute(args: adsk.core.CommandEventArgs):
 
     inputs = args.command.commandInputs
 
-    selectionInput = inputs.itemById("selected_bodies")
+    selectionInput = inputs.itemById("selectedBodies")
     selectedFolder = inputs.itemById("folderPathInput").text
+    filenameTable = inputs.itemById('filenameTable')
     replace = inputs.itemById("replaceButton").value
-    openLocation = inputs.itemById("openLocationButton").value
-    versionNumber = inputs.itemById('versionInput').value
-    prefix = inputs.itemById('prefixInput').value
-    suffix = inputs.itemById('suffixInput').value
-    formattingStyleIndex = inputs.itemById('nameFormatInput').selectedItem.index
 
-    exportSelectedBodies(selectionInput, selectedFolder, replace, openLocation, versionNumber, prefix, suffix, formattingStyleIndex)
+    exportSelectedBodies(selectionInput, selectedFolder, replace, filenameTable)
 
 
 # This event handler is called when the command needs to compute a new preview in the graphics window.
@@ -179,20 +176,50 @@ def command_preview(args: adsk.core.CommandEventArgs):
     futil.log(f"{CMD_NAME} Command Preview Event")
     inputs = args.command.commandInputs
 
+previous_selected_bodies = []
 
 # This event handler is called when the user changes anything in the command dialog
 # allowing you to modify values of other inputs based on that change.
 def command_input_changed(args: adsk.core.InputChangedEventArgs):
     changed_input = args.input
-    inputs = args.inputs
+    partial_inputs = args.inputs
+    
+    # Get the parent command object from the event arguments.
+    command = args.firingEvent.sender
+    # Access the complete collection of inputs from the command object.
+    inputs = command.commandInputs
 
-    selectionInput = inputs.itemById("selected_bodies")
-    selectedFolderInput = inputs.itemById("folderPathInput")
-    filenameTable = inputs.itemById('filenameTable')
-    versionNumberInput = inputs.itemById('versionInput')
-    prefixInput = inputs.itemById('prefixInput')
-    suffixInput = inputs.itemById('suffixInput')
-    nameFormatInput = inputs.itemById('nameFormatInput')
+    # General logging for debug.
+    futil.log(
+        f"{CMD_NAME} Input Changed Event fired from a change to {changed_input.id}"
+    )
+
+    try:
+        selectionInput = inputs.itemById("selectedBodies")
+        selectedFolderInput = inputs.itemById("folderPathInput")
+        filenameTable = inputs.itemById('filenameTable')
+        versionNumberInput = inputs.itemById('versionInput')
+        prefixInput = inputs.itemById('prefixInput')
+        suffixInput = inputs.itemById('suffixInput')
+        nameFormatInput = inputs.itemById('nameFormatInput')
+    except:
+        pass
+
+    global previous_selected_bodies
+
+    selected_bodies = []
+    if not selectionInput:
+        selected_bodies = previous_selected_bodies
+    else:
+        count = selectionInput.selectionCount
+        for i in range(count):
+            name = selectionInput.selection(i).entity
+            selected_bodies.append(name)
+        
+    versionNumber = versionNumberInput.value
+    prefix = prefixInput.value
+    suffix = suffixInput.value
+    formattingStyleIndex = nameFormatInput.selectedItem.index
 
     if changed_input.id == "browseButton":
         try:
@@ -216,45 +243,49 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
             changed_input.value = False
         except:
             futil.log("Failed:\n{}".format(traceback.format_exc()))
-        
 
-    ###############################################################
-    ######## This code is run every time any inputs change ########
-    ###############################################################
+    elif changed_input.id in ['versionInput', 'prefixInput', 'suffixInput', 'nameFormatInput']:
+        # When versionInput changes, update all filename textboxes in the table
+        for i, body in enumerate(selected_bodies):
+            body_name = body.name
+            textBoxId = body.revisionId
+            filename = generateFilename(body_name, versionNumber, prefix, suffix, formattingStyleIndex)
+            nameInput = inputs.itemById(textBoxId)
+            if nameInput:
+                nameInput.value = filename
 
-    filenameTable.clear()
+    elif changed_input.id == 'selectedBodies':
+        added_body = [name for name in selected_bodies if name not in previous_selected_bodies]
+        removed_body = [name for name in previous_selected_bodies if name not in selected_bodies]
 
-    formattingStyleIndex = nameFormatInput.selectedItem.index
+        if added_body:
+            for i, body in enumerate(added_body):
+                # Create unique IDs and display names for each input
+                body_name = body.name
+                textBoxId = body.revisionId
+                filename = generateFilename(body_name, versionNumber, prefix, suffix, formattingStyleIndex)
+                textBoxValue = filename
 
-    selectedBodyNames = []
-    count = selectionInput.selectionCount
-    for i in range(count):
-        name = selectionInput.selection(i).entity.name
-        selectedBodyNames.append(name)
+                # Create a new TextBoxCommandInput
+                subTextInput = inputs.addStringValueInput(textBoxId, '', textBoxValue)
+                subTextInput.isFullWidth = True
 
-    for i, name in enumerate(selectedBodyNames):
+                # Add to the next available row in the table
+                row = filenameTable.rowCount
+                filenameTable.addCommandInput(subTextInput, row, 0)
+        elif removed_body:
+            for i, body in enumerate(removed_body):
+                try:
+                    nameInput = inputs.itemById(body.revisionId)
+                    (returnValue, row, column, rowSpan, columnSpan) = filenameTable.getPosition(nameInput)
+                    delete_row = filenameTable.deleteRow(row)
+                except:
+                    futil.log("Failed:\n{}".format(traceback.format_exc()))
 
-        # Create unique IDs and display names for each input
-        textBoxId = f'subText_{i}'
-        textBoxName = f'Body {i+1}'
-        versionNumber = versionNumberInput.value
-        prefix = prefixInput.value
-        suffix = suffixInput.value
-        filename = generateFilename(name, versionNumber, prefix, suffix, formattingStyleIndex)
-        textBoxValue = filename
+        # Update previous_selected_bodies for next change
+        previous_selected_bodies = selected_bodies.copy()
 
-        # Create a new TextBoxCommandInput
-        subTextInput = inputs.addTextBoxCommandInput(textBoxId, textBoxName, textBoxValue, 1, True)
-
-        # Add to the next available row in the table
-        row = filenameTable.rowCount
-        filenameTable.addCommandInput(subTextInput, row, 0)
-
-
-    # General logging for debug.
-    futil.log(
-        f"{CMD_NAME} Input Changed Event fired from a change to {changed_input.id}"
-    )
+    
 
 
 # This event handler is called when the user interacts with any of the inputs in the dialog
@@ -270,18 +301,53 @@ def command_validate_input(args: adsk.core.ValidateInputsEventArgs):
     # Get the selected folder path
     folderPathInput = inputs.itemById("folderPathInput")
     selectedFolder = folderPathInput.text
+    selectionInput = inputs.itemById("selectedBodies")
+    filenameTable = inputs.itemById('filenameTable')
 
-    if selectedFolder and os.path.exists(selectedFolder):
-        args.areInputsValid = True
-    else:
+    errorTextInput = inputs.itemById('errorTextInput')
+
+    # Validate selected folder
+    if not selectedFolder or not os.path.exists(selectedFolder):
         args.areInputsValid = False
-
-    selectionInput = inputs.itemById("selected_bodies")
-
-    if selectionInput.selectionCount != 0:
-        args.areInputsValid = True
+        errorTextInput.text = "Selected folder does not exist."
+        return
     else:
+        errorTextInput.text = ''
+
+    # Validate selection
+    if selectionInput.selectionCount == 0:
         args.areInputsValid = False
+        errorTextInput.text = "No bodies selected."
+        return
+    else:
+        errorTextInput.text = ''
+
+    # Validate filenames
+    if filenameTable.rowCount:
+        for i in range(filenameTable.rowCount):
+            nameInput = filenameTable.getInputAtPosition(i, 0)
+            name = nameInput.value
+
+            # Check if name contains any invalid characters
+            invalid_pattern = r'[<>:"/\\|?*\x00-\x1F]'
+            if re.search(invalid_pattern, name):
+                args.areInputsValid = False
+                errorTextInput.text = f"Filename '{name}' contains invalid characters."
+                return
+    
+    # Check for repeated filenames
+    filenames = []
+    for i in range(filenameTable.rowCount):
+        nameInput = filenameTable.getInputAtPosition(i, 0)
+        name = nameInput.value
+        filenames.append(name)
+    duplicates = set([x for x in filenames if filenames.count(x) > 1])
+    if duplicates:
+        args.areInputsValid = False
+        errorTextInput.text = f"Duplicate filenames found: {', '.join(duplicates)}"
+        return
+        
+
 
 
 # This event handler is called when the command terminates.
@@ -289,11 +355,12 @@ def command_destroy(args: adsk.core.CommandEventArgs):
     # General logging for debug.
     futil.log(f"{CMD_NAME} Command Destroy Event")
 
-    global local_handlers
+    global local_handlers, previous_selected_bodies
+    previous_selected_bodies = []
     local_handlers = []
 
 
-def exportSelectedBodies(selectionInput, exportFolder, replace, openLocation, versionNumber, prefix, suffix, formattingStyleIndex):
+def exportSelectedBodies(selectionInput, exportFolder, replace, filenameTable):
     try:
         design = app.activeProduct
 
@@ -318,17 +385,16 @@ def exportSelectedBodies(selectionInput, exportFolder, replace, openLocation, ve
             try:
                 # Create STL export options
                 stlOptions = exportMgr.createSTLExportOptions(body)
-
-                bodyName = body.name
-                fileName = generateFilename(bodyName, versionNumber, prefix, suffix, formattingStyleIndex)
+                
+                filenameInput = filenameTable.getInputAtPosition(i, 0)
+                fileName = filenameInput.value
                 filePath = os.path.join(exportFolder, fileName)
-
-                futil.log(filePath)
 
                 if not replace:
                     counter = 1
                     while os.path.exists(filePath):
                         name, ext = os.path.splitext(fileName)
+                        name = re.sub(r'\(\d+\)', '', name)
                         fileName = f"{name}({counter}){ext}"
                         filePath = os.path.join(exportFolder, fileName)
                         counter += 1
@@ -352,14 +418,13 @@ def exportSelectedBodies(selectionInput, exportFolder, replace, openLocation, ve
         # Show completion message
         if successCount > 0:
             fileList = "\n".join(f"• {file}" for file in exportedFiles)
-            ui.messageBox(
-                f"Successfully exported {successCount} of {len(selectedBodies)} bodies to:\n{exportFolder}\n\nFiles created:\n{fileList}"
-            )
+            text_message = f"Successfully exported {successCount} of {len(selectedBodies)} bodies to:\n{exportFolder}\n\nFiles created:\n{fileList}"
+            returnValue = ui.messageBox(text_message, 'Open location?', 3)
+
+            if returnValue == 2:
+                openFolderLocation(exportFolder)
 
             saveLastUsedFolder(exportFolder)
-
-            if openLocation:
-                openFolderLocation(exportFolder)
 
         else:
             futil.log("No bodies were exported successfully.")
@@ -369,7 +434,7 @@ def exportSelectedBodies(selectionInput, exportFolder, replace, openLocation, ve
 
 def generateFilename(bodyName, versionNumber, prefix, suffix, formattingStyleIndex):
     name = sanitize_filename(bodyName)
-    versionStr = f"v{str(versionNumber).strip()}" if str(versionNumber).strip() else ""
+    versionStr = str(versionNumber).strip()
 
     nameSplit, ext = os.path.splitext(name)
     
@@ -384,17 +449,19 @@ def generateFilename(bodyName, versionNumber, prefix, suffix, formattingStyleInd
 
     if formattingStyleIndex == 1: #PascalCase
         name = ''.join(w.capitalize() for w in words) + ext
+        versionStr = f"V{versionStr}" if versionStr else ""
     elif formattingStyleIndex == 2: #camelCase
         name = words[0] + ''.join(w.capitalize() for w in words[1:]) + ext
+        versionStr = f"V{versionStr}" if versionStr else ""
     elif formattingStyleIndex == 3: #snake_case
         name = '_'.join(words) + ext
-        versionStr = f'_{versionStr}'
+        versionStr = f"_v{versionStr}" if versionStr else ""
     elif formattingStyleIndex == 4: #kebab-case
         name = '-'.join(words) + ext
-        versionStr = f'-{versionStr}'
+        versionStr = f"-v{versionStr}" if versionStr else ""
     elif formattingStyleIndex == 5: #space separated
         name = ' '.join(words) + ext
-        versionStr = f' {versionStr}'
+        versionStr = f" v{versionStr}" if versionStr else ""
     else:
         pass
 
@@ -477,7 +544,7 @@ def openFolderLocation(folderPath):
         # If opening fails, show the path in a message
         app = adsk.core.Application.get()
         ui = app.userInterface
-        futil.log(
+        ui.messageBox(
             f"Could not open folder automatically.\nFiles saved to:\n{folderPath}"
         )
 
