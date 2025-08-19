@@ -1,5 +1,12 @@
 {
-	"python.autoComplete.extraPaths":	["/Users/kpkrisnop/Library/Application Support/Autodesk/Autodesk Fusion 360/API/Python/defs"],
-	"python.analysis.extraPaths":	["/Users/kpkrisnop/Library/Application Support/Autodesk/Autodesk Fusion 360/API/Python/defs"],
-	"python.defaultInterpreterPath":	"/Users/kpkrisnop/Library/Application Support/Autodesk/webdeploy/production/0334951b8511373f9371ab45cc5be9968252b33c/Autodesk Fusion.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python"
+  "python.autoComplete.extraPaths": [
+    "/Users/kpkrisnop/Library/Application Support/Autodesk/Autodesk Fusion 360/API/Python/defs"
+  ],
+  "python.analysis.extraPaths": [
+    "/Users/kpkrisnop/Library/Application Support/Autodesk/Autodesk Fusion 360/API/Python/defs"
+  ],
+  "python.defaultInterpreterPath": "/Users/kpkrisnop/Library/Application Support/Autodesk/webdeploy/production/0334951b8511373f9371ab45cc5be9968252b33c/Autodesk Fusion.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python",
+  "cursorpyright.analysis.extraPaths": [
+    "/Users/kpkrisnop/Library/Application Support/Autodesk/Autodesk Fusion 360/API/Python/defs"
+  ]
 }

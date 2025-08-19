@@ -83,7 +83,7 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
     # General logging for debug.
     futil.log(f"{CMD_NAME} Command Created Event")
 
-    # https://help.autodesk.com/view/fusion360/ENU/?contextId=CommandInputs
+    # https://help.autodesk.com/view/fusion360/ENU?contextId=CommandInputs
     inputs = args.command.commandInputs
 
     # TODO Define the dialog for your command by adding different inputs to the command.
@@ -182,10 +182,11 @@ previous_selected_bodies = []
 # allowing you to modify values of other inputs based on that change.
 def command_input_changed(args: adsk.core.InputChangedEventArgs):
     changed_input = args.input
-    partial_inputs = args.inputs
+    parent_inputs = args.inputs
     
     # Get the parent command object from the event arguments.
     command = args.firingEvent.sender
+    command = adsk.core.Command.cast(command)
     # Access the complete collection of inputs from the command object.
     inputs = command.commandInputs
 
@@ -194,16 +195,17 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
         f"{CMD_NAME} Input Changed Event fired from a change to {changed_input.id}"
     )
 
-    try:
-        selectionInput = inputs.itemById("selectedBodies")
-        selectedFolderInput = inputs.itemById("folderPathInput")
-        filenameTable = inputs.itemById('filenameTable')
-        versionNumberInput = inputs.itemById('versionInput')
-        prefixInput = inputs.itemById('prefixInput')
-        suffixInput = inputs.itemById('suffixInput')
-        nameFormatInput = inputs.itemById('nameFormatInput')
-    except:
-        pass
+    product = app.activeProduct
+    design = adsk.fusion.Design.cast(product)
+    root_comp = design.rootComponent
+
+    selectionInput = adsk.core.SelectionCommandInput.cast(inputs.itemById("selectedBodies"))
+    selectedFolderInput = adsk.core.TextBoxCommandInput.cast(inputs.itemById("folderPathInput"))
+    filenameTable = adsk.core.TableCommandInput.cast(inputs.itemById('filenameTable'))
+    versionNumberInput = adsk.core.StringValueCommandInput.cast(inputs.itemById('versionInput'))
+    prefixInput = adsk.core.StringValueCommandInput.cast(inputs.itemById('prefixInput'))
+    suffixInput = adsk.core.StringValueCommandInput.cast(inputs.itemById('suffixInput'))
+    nameFormatInput = adsk.core.DropDownCommandInput.cast(inputs.itemById('nameFormatInput'))
 
     global previous_selected_bodies
 
@@ -222,6 +224,7 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
     formattingStyleIndex = nameFormatInput.selectedItem.index
 
     if changed_input.id == "browseButton":
+        changed_input = adsk.core.BoolValueCommandInput.cast(changed_input)
         try:
             currentSelectedFolder = selectedFolderInput.text
 
@@ -236,7 +239,7 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
             if dialogResult == adsk.core.DialogResults.DialogOK:
                 # Update the text input with selected folder path
                 path = folderDialog.folder
-                pathInput = inputs.itemById("folderPathInput")
+                pathInput = adsk.core.TextBoxCommandInput.cast(inputs.itemById("folderPathInput"))
                 pathInput.text = path
 
             # Reset button state
@@ -247,10 +250,16 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
     elif changed_input.id in ['versionInput', 'prefixInput', 'suffixInput', 'nameFormatInput']:
         # When versionInput changes, update all filename textboxes in the table
         for i, body in enumerate(selected_bodies):
+            body = adsk.fusion.BRepBody.cast(body)
+            parent_component = body.parentComponent
             body_name = body.name
+
+            if body.name == 'Body1' and parent_component != root_comp:
+                body_name = parent_component.name
+            
             textBoxId = body.revisionId
             filename = generateFilename(body_name, versionNumber, prefix, suffix, formattingStyleIndex)
-            nameInput = inputs.itemById(textBoxId)
+            nameInput = adsk.core.StringValueCommandInput.cast(inputs.itemById(textBoxId))
             if nameInput:
                 nameInput.value = filename
 
@@ -261,7 +270,13 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
         if added_body:
             for i, body in enumerate(added_body):
                 # Create unique IDs and display names for each input
+                body = adsk.fusion.BRepBody.cast(body)
+                parent_component = body.parentComponent
                 body_name = body.name
+
+                if body.name == 'Body1' and parent_component != root_comp:
+                    body_name = parent_component.name
+                
                 textBoxId = body.revisionId
                 filename = generateFilename(body_name, versionNumber, prefix, suffix, formattingStyleIndex)
                 textBoxValue = filename
@@ -299,12 +314,12 @@ def command_validate_input(args: adsk.core.ValidateInputsEventArgs):
     # Verify the validity of the input values. This controls if the OK button is enabled or not.
 
     # Get the selected folder path
-    folderPathInput = inputs.itemById("folderPathInput")
-    selectedFolder = folderPathInput.text
-    selectionInput = inputs.itemById("selectedBodies")
-    filenameTable = inputs.itemById('filenameTable')
+    selectedFolderInput = adsk.core.TextBoxCommandInput.cast(inputs.itemById("folderPathInput"))
+    selectionInput = adsk.core.SelectionCommandInput.cast(inputs.itemById("selectedBodies"))
+    filenameTable = adsk.core.TableCommandInput.cast(inputs.itemById('filenameTable'))
+    errorTextInput = adsk.core.TextBoxCommandInput.cast(inputs.itemById('errorTextInput'))
 
-    errorTextInput = inputs.itemById('errorTextInput')
+    selectedFolder = selectedFolderInput.text
 
     # Validate selected folder
     if not selectedFolder or not os.path.exists(selectedFolder):
@@ -346,8 +361,6 @@ def command_validate_input(args: adsk.core.ValidateInputsEventArgs):
         args.areInputsValid = False
         errorTextInput.text = f"Duplicate filenames found: {', '.join(duplicates)}"
         return
-        
-
 
 
 # This event handler is called when the command terminates.
@@ -362,7 +375,10 @@ def command_destroy(args: adsk.core.CommandEventArgs):
 
 def exportSelectedBodies(selectionInput, exportFolder, replace, filenameTable):
     try:
-        design = app.activeProduct
+        selectionInput = adsk.core.SelectionCommandInput.cast(selectionInput)
+        filenameTable = adsk.core.TableCommandInput.cast(filenameTable)
+        
+        design = adsk.fusion.Design.cast(app.activeProduct)
 
         if not design:
             futil.log("No active design found.")
@@ -383,6 +399,8 @@ def exportSelectedBodies(selectionInput, exportFolder, replace, filenameTable):
 
         for i, body in enumerate(selectedBodies):
             try:
+                body = adsk.fusion.BRepBody.cast(body)
+                
                 # Create STL export options
                 stlOptions = exportMgr.createSTLExportOptions(body)
                 
@@ -432,8 +450,13 @@ def exportSelectedBodies(selectionInput, exportFolder, replace, filenameTable):
     except:
         futil.log("Failed to export:\n{}".format(traceback.format_exc()))
 
+
 def generateFilename(bodyName, versionNumber, prefix, suffix, formattingStyleIndex):
-    name = sanitize_filename(bodyName)
+    # Remove invalid characters
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1F]', '', bodyName)
+    # Remove trailing spaces or dots
+    name.rstrip(" .")
+
     versionStr = str(versionNumber).strip()
 
     nameSplit, ext = os.path.splitext(name)
@@ -466,6 +489,7 @@ def generateFilename(bodyName, versionNumber, prefix, suffix, formattingStyleInd
         pass
 
     return f'{prefix}{name}{versionStr}{suffix}.stl'
+
 
 def getLastUsedFolder():
     # Get the last used folder from document attributes
@@ -547,9 +571,3 @@ def openFolderLocation(folderPath):
         ui.messageBox(
             f"Could not open folder automatically.\nFiles saved to:\n{folderPath}"
         )
-
-def sanitize_filename(name):
-    # Remove invalid characters
-    name = re.sub(r'[<>:"/\\|?*\x00-\x1F]', '', name)
-    # Remove trailing spaces or dots
-    return name.rstrip(" .")
